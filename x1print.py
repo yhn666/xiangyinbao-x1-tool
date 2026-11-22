@@ -103,7 +103,7 @@ async def main_async(args: argparse.Namespace) -> int:
             save_mac(addr)
         return 0
 
-    addr = await resolve_addr(args.mac)
+    # 只预览（--no-print）时不需要设备地址，避免在无蓝牙环境里扫描（CI 也能跑）\r\n    addr = args.mac if args.no_print else await resolve_addr(args.mac)
     printer = None
     if not args.no_print:
         printer = make_printer(addr, args)
