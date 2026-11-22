@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 本机设备地址（每台电脑不同，别提交）
+.x1_mac
+
+# 预览/中间产物
+*.preview.png
+*.preview.jpg
+examples/*.preview.png
+
+# PDF 逐页导出的临时 PNG
+*.p[0-9].png
+
+# 反编译产物（不随仓库分发）
+_reverse/
+_jadx*/
+_apk/
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 本地 gh CLI 配置/凭据
+_gh/

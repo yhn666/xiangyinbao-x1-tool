@@ -1,0 +1,27 @@
+theme: minimal
+margin: 14
+gap: 10
+blocks:
+  - type: title
+    text: 今日便签
+    subtitle: 2026-11-22 星期六 · 秦皇岛
+    size: 28
+
+  - type: divider
+    style: double
+
+  - type: kv
+    items:
+      - [打印机, 相印宝 X1]
+      - [通道, 蓝牙 SPP / COM3]
+      - [浓度, 95（普通纸）]
+      - [纸尾, 30mm]
+
+  - type: divider
+    style: dots
+
+  - type: text
+    text: >-
+      上午：检查作业提交情况；下午：把实验报告的图重画一遍，
+      记得用粗线、大字号，热敏纸放久了会变淡。
+    size: 18

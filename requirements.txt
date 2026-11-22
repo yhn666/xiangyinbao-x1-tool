@@ -1,0 +1,9 @@
+bleak>=0.22
+pyserial>=3.5
+pillow>=10.0
+PyYAML>=6.0
+qrcode>=7.4
+python-barcode>=0.15
+
+# 可选：打印 PDF 才需要
+# pymupdf>=1.24
