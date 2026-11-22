@@ -230,7 +230,7 @@ async def main_async(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="相印宝 X1 打印机（经典蓝牙串口 / BLE 直连）")
+    ap = argparse.ArgumentParser(prog="x1print", description="相印宝 X1 打印机（经典蓝牙串口 / BLE 直连）")
     ap.add_argument("content", nargs="?", help="要打印的文字或 .txt/.md 文件路径")
     ap.add_argument("--layout", help="用 YAML 布局打印整页（支持 title/text/divider/kv/qr/barcode/image/space）")
     ap.add_argument("--qr", help="在文字下方加一个二维码（内容是这段文字）")
@@ -263,6 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--no-print", action="store_true", help="只生成预览，不真的打印")
     ap.add_argument("--force", action="store_true", help="忽略状态异常（缺纸/开盖）强制打印")
     ap.add_argument("--dither", action="store_true", help="等价于 --mode photo")
+    ap.add_argument("--version", action="version", version="x1print 0.1.1")
     ap.add_argument("--no-save", action="store_true", help="扫描后不记住 MAC")
     return ap
 

@@ -27,21 +27,19 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from yaml import safe_load
 
+from x1 import load_font
+
 W = 384
-FONT_SANS = "C:/Windows/Fonts/msyh.ttc"
-FONT_SANS_B = "C:/Windows/Fonts/msyhbd.ttc"
-FONT_SERIF = "C:/Windows/Fonts/simsun.ttc"
 
 THEMES = {
-    "minimal": {"frame": None, "title_font": FONT_SANS_B, "body_font": FONT_SANS, "rule": 1},
-    "classic": {"frame": "double", "title_font": FONT_SERIF, "body_font": FONT_SERIF, "rule": 2},
-    "notebook": {"frame": None, "title_font": FONT_SANS_B, "body_font": FONT_SANS, "rule": 1,
-                 "ruled": True},
+    "minimal": {"frame": None, "title": "bold", "body": "sans", "rule": 1},
+    "classic": {"frame": "double", "title": "serif", "body": "serif", "rule": 2},
+    "notebook": {"frame": None, "title": "bold", "body": "sans", "rule": 1, "ruled": True},
 }
 
 
-def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(path, size)
+def _font(kind: str, size: int) -> ImageFont.ImageFont:
+    return load_font(size, kind)
 
 
 def _wrap(text: str, font: ImageFont.FreeTypeFont, width: int) -> list[str]:
@@ -80,8 +78,8 @@ class LayoutRenderer:
 
         if kind == "title":
             size = int(b.get("size", self.body + 8))
-            f = _font(self.theme["title_font"], size)
-            f2 = _font(self.theme["body_font"], max(14, size - 10))
+            f = _font(self.theme["title"], size)
+            f2 = _font(self.theme["body"], max(14, size - 10))
             lines = _wrap(str(b.get("text", "")), f, inner_w)
             sub = b.get("subtitle")
             h = len(lines) * int(size * 1.3) + (int(size * 0.95) if sub else 0) + 6
@@ -121,7 +119,7 @@ class LayoutRenderer:
 
         if kind == "kv":
             size = int(b.get("size", self.body))
-            f = _font(self.theme["body_font"], size)
+            f = _font(self.theme["body"], size)
             items = b.get("items", [])
             h = len(items) * int(size * 1.45) + 4
             img = Image.new("L", (W, h), 255)
@@ -148,7 +146,7 @@ class LayoutRenderer:
 
         if kind == "text":
             size = int(b.get("size", self.body))
-            f = _font(self.theme["body_font"], size)
+            f = _font(self.theme["body"], size)
             lines = _wrap(str(b.get("text", "")), f, inner_w)
             lh = int(size * 1.35)
             img = Image.new("L", (W, len(lines) * lh + 8), 255)

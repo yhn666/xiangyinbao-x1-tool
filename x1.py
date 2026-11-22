@@ -90,12 +90,44 @@ def _pack_bits(img: Image.Image) -> bytes:
 
 MIN_FONT_SIZE = 14  # 实测 12 号以下中文已糊成一团
 
+FONT_SANS_CANDIDATES = [
+    "C:/Windows/Fonts/msyh.ttc",          # 微软雅黑
+    "C:/Windows/Fonts/msyh.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
+]
+FONT_BOLD_CANDIDATES = [
+    "C:/Windows/Fonts/msyhbd.ttc",
+    "C:/Windows/Fonts/msyhbd.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
+]
+FONT_SERIF_CANDIDATES = [
+    "C:/Windows/Fonts/simsun.ttc",
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
+    "/System/Library/Fonts/Songti.ttc",
+]
+
+
+def load_font(size: int, kind: str = "sans", prefer: str | None = None) -> ImageFont.ImageFont:
+    """按平台挑一个能用的中文字体；都没有就退回 Pillow 内置位图字体。"""
+    pool = {"sans": FONT_SANS_CANDIDATES,
+            "bold": FONT_BOLD_CANDIDATES,
+            "serif": FONT_SERIF_CANDIDATES}.get(kind, FONT_SANS_CANDIDATES)
+    for candidate in ([prefer] if prefer else []) + pool:
+        try:
+            return ImageFont.truetype(candidate, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
 
 def render_text(text: str, font_size: int = 30, font_path: str | None = None,
                 margin: int = 16) -> Image.Image:
     font_size = max(MIN_FONT_SIZE, int(font_size))
-    font_path = font_path or "C:/Windows/Fonts/msyh.ttc"
-    font = ImageFont.truetype(font_path, font_size)
+    font = load_font(font_size, prefer=font_path)
     max_w = DOT_WIDTH - margin * 2
 
     lines: list[str] = []
@@ -247,7 +279,7 @@ def make_qr(data: str, caption: str | None = None, size: int = 224) -> Image.Ima
     canvas = Image.new("L", (DOT_WIDTH, h), 255)
     canvas.paste(img, ((DOT_WIDTH - size) // 2, 4))
     if caption:
-        font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 18)
+        font = load_font(18)
         d = ImageDraw.Draw(canvas)
         w = d.textlength(caption, font=font)
         d.text(((DOT_WIDTH - w) // 2, size + 8), caption, font=font, fill=0)
@@ -269,63 +301,52 @@ def make_barcode(data: str, fmt: str = "code128", caption: str | None = None) ->
     canvas = Image.new("L", (DOT_WIDTH, h), 255)
     canvas.paste(img, (0, 4))
     if caption:
-        font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 18)
+        font = load_font(18)
         d = ImageDraw.Draw(canvas)
         w = d.textlength(caption, font=font)
         d.text(((DOT_WIDTH - w) // 2, img.height + 8), caption, font=font, fill=0)
     return canvas
 
 
-class X1Serial:
-    """经典蓝牙 SPP（官方 App 走的通道）：Windows 配对后是一个虚拟串口，吞吐高、出纸连续。"""
+class _ProtocolTransport:
+    """两条传输共享的协议层：帧收发、握手、状态、浓度、走纸、打印。
 
-    def __init__(self, port: str, baudrate: int = 115200) -> None:
-        import serial  # pyserial
+    子类只需要实现 connect/close/_write/_fill。
+    """
 
-        self.port = port
-        self.ser = serial.Serial(port, baudrate, timeout=0.2, write_timeout=5)
+    def __init__(self) -> None:
         self.rx = bytearray()
         self.key = DEFAULT_CRC_KEY
         self.pkg = 1
 
-    @staticmethod
-    def find_port(mac: str | None = None) -> str | None:
-        """按 MAC 找配对后生成的蓝牙串口，避免误抓到别的蓝牙串口。"""
-        from serial.tools import list_ports
-
-        want = mac.replace(":", "").upper() if mac else None
-        for p in list_ports.comports():
-            hwid = (p.hwid or "").upper()
-            if "BTHENUM" not in hwid:
-                continue
-            if want and want in hwid:
-                return p.device
-            if not want:
-                return p.device
-        return None
-
-    # 与 BLE 版一致的接口 -------------------------------------------------
+    # --- 子类实现 ---
     async def connect(self) -> None:
-        if not await self.handshake():
-            raise RuntimeError("CRC 密钥握手失败")
+        raise NotImplementedError
 
     async def close(self) -> None:
-        self.ser.close()
+        raise NotImplementedError
 
-    async def __aenter__(self) -> "X1Serial":
+    async def _write(self, data: bytes) -> None:
+        raise NotImplementedError
+
+    def _fill(self) -> None:
+        """把底层收到的数据搬进 self.rx（SPP 用；BLE 由回调直接写入）。"""
+
+    async def __aenter__(self) -> "_ProtocolTransport":
         await self.connect()
         return self
 
     async def __aexit__(self, *exc) -> None:
         await self.close()
 
-    async def _write(self, data: bytes) -> None:
-        self.ser.write(data)
+    # --- 共用逻辑 ---
+    def _next_pkg(self) -> int:
+        val = self.pkg
+        self.pkg = 1 if self.pkg >= 127 else self.pkg + 1
+        return val
 
     def _pop_frame(self) -> bytes | None:
-        data = self.ser.read(max(1, self.ser.in_waiting))
-        if data:
-            self.rx.extend(data)
+        self._fill()
         while True:
             start = self.rx.find(bytes([STX]))
             if start < 0:
@@ -334,7 +355,7 @@ class X1Serial:
             if len(self.rx) < start + 6:
                 return None
             length = struct.unpack_from("<H", self.rx, start + 3)[0]
-            end = start + 10 + length
+            end = start + 10 + length          # STX+cmd+pkg+len(2)+payload+crc(4)+ETX
             if len(self.rx) < end:
                 return None
             frame = bytes(self.rx[start:end])
@@ -342,12 +363,8 @@ class X1Serial:
             if frame[-1] == ETX:
                 return frame
 
-    def _next_pkg(self) -> int:
-        val = self.pkg
-        self.pkg = 1 if self.pkg >= 127 else self.pkg + 1
-        return val
-
-    async def request(self, cmd: int, payload: bytes = b"\x00", timeout: float = 2.0) -> bytes | None:
+    async def request(self, cmd: int, payload: bytes = b"\x00",
+                      timeout: float = 2.0) -> bytes | None:
         await self._write(build_frame(cmd, self._next_pkg(), payload, self.key))
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
@@ -356,10 +373,11 @@ class X1Serial:
             if frame and frame[1] == cmd:
                 length = struct.unpack_from("<H", frame, 3)[0]
                 return frame[5:5 + length]
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.02)
         return None
 
     async def handshake(self, timeout: float = 2.0) -> bool:
+        """用随机密钥换掉默认 CRC 初值；设备回 0 表示成功。"""
         self.key = DEFAULT_CRC_KEY
         new_key = random.randint(2, 0x7FFFFFFF)
         payload = struct.pack("<I", new_key ^ DEFAULT_CRC_KEY)
@@ -384,135 +402,7 @@ class X1Serial:
         }
 
     async def set_density(self, level: int) -> None:
-        await self._write(build_frame(CMD_DENSITY, self._next_pkg(), bytes([level & 0xFF]), self.key))
-        await asyncio.sleep(0.1)
-
-    async def feed(self, lines: int = DEFAULT_FEED_LINES) -> None:
-        payload = struct.pack("<H", (lines * 8) * 3)
-        await self._write(build_frame(CMD_FEED, self._next_pkg(), payload, self.key))
-
-    async def print_image(self, img: Image.Image, feed_lines: int = DEFAULT_FEED_LINES,
-                          mode: str = "text", lead_lines: int = 0, sharpen: bool = False,
-                          shift_dots: int = DEFAULT_SHIFT_DOTS, smooth: bool = False) -> None:
-        if lead_lines:
-            await self.feed(lead_lines)
-            await asyncio.sleep(0.2)
-        bits = _pack_bits(prepare(img, mode, sharpen, shift_dots, smooth))
-        step = (DOT_WIDTH // 8) * ROWS_PER_PACKET
-        for i in range(0, len(bits), step):
-            await self._write(build_frame(CMD_PRINT, self._next_pkg(), bits[i:i + step], self.key))
-        if feed_lines:
-            await self.feed(feed_lines)
-
-    async def print_text(self, text: str, font_size: int = 30,
-                         feed_lines: int = DEFAULT_FEED_LINES, lead_lines: int = 0) -> None:
-        await self.print_image(render_text(text, font_size), feed_lines=feed_lines,
-                               lead_lines=lead_lines)
-
-
-class X1Printer:
-    def __init__(self, addr: str | None = None) -> None:
-        self.addr = addr or ADDR_DEFAULT
-        self.client: BleakClient | None = None
-        self.rx = bytearray()
-        self.key = DEFAULT_CRC_KEY
-        self.pkg = 1
-
-    async def connect(self) -> None:
-        self.client = BleakClient(self.addr, timeout=25.0)
-        await self.client.connect()
-        await self.client.start_notify(CH_NOTIFY, self._on_notify)
-        await asyncio.sleep(0.3)
-        self.rx.clear()
-        if not await self.handshake():
-            raise RuntimeError("CRC 密钥握手失败")
-
-    async def close(self) -> None:
-        if self.client:
-            await self.client.disconnect()
-            self.client = None
-
-    async def __aenter__(self) -> "X1Printer":
-        await self.connect()
-        return self
-
-    async def __aexit__(self, *exc) -> None:
-        await self.close()
-
-    def _on_notify(self, _sender, data: bytearray) -> None:
-        self.rx.extend(data)
-
-    async def _write(self, data: bytes) -> None:
-        """按「一小段猛发 + 停一下」的节奏发，兼顾速度和不丢包。"""
-        assert self.client is not None
-        for i in range(0, len(data), WRITE_BURST):
-            seg = data[i:i + WRITE_BURST]
-            for j in range(0, len(seg), WRITE_CHUNK):
-                await self.client.write_gatt_char(CH_WRITE, seg[j:j + WRITE_CHUNK],
-                                                 response=WRITE_RESPONSE)
-            if WRITE_PAUSE:
-                await asyncio.sleep(WRITE_PAUSE)
-
-    def _next_pkg(self) -> int:
-        val = self.pkg
-        self.pkg = 1 if self.pkg >= 127 else self.pkg + 1
-        return val
-
-    def _pop_frame(self) -> bytes | None:
-        while True:
-            start = self.rx.find(bytes([STX]))
-            if start < 0:
-                self.rx.clear()
-                return None
-            if len(self.rx) < start + 6:
-                return None
-            length = struct.unpack_from("<H", self.rx, start + 3)[0]
-            end = start + 10 + length
-            if len(self.rx) < end:
-                return None
-            frame = bytes(self.rx[start:end])
-            del self.rx[:end]
-            if frame[-1] == ETX:
-                return frame
-
-    async def request(self, cmd: int, payload: bytes = b"\x00", timeout: float = 2.0) -> bytes | None:
-        await self._write(build_frame(cmd, self._next_pkg(), payload, self.key))
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
-        while loop.time() < deadline:
-            frame = self._pop_frame()
-            if frame and frame[1] == cmd:
-                length = struct.unpack_from("<H", frame, 3)[0]
-                return frame[5:5 + length]
-            await asyncio.sleep(0.02)
-        return None
-
-    async def handshake(self, timeout: float = 2.0) -> bool:
-        self.key = DEFAULT_CRC_KEY
-        new_key = random.randint(2, 0x7FFFFFFF)
-        payload = struct.pack("<I", new_key ^ DEFAULT_CRC_KEY)
-        resp = await self.request(CMD_CRC_KEY, payload, timeout=timeout)
-        if resp and resp[0] == 0:
-            self.key = new_key
-            return True
-        return False
-
-    async def status(self) -> int | None:
-        resp = await self.request(CMD_STATUS, b"\x00")
-        return resp[0] if resp else None
-
-    async def info(self) -> dict:
-        out = {}
-        v = await self.request(CMD_VERSION, b"\x00")
-        out["version"] = ".".join(str(b) for b in v[:3]) if v else None
-        s = await self.request(CMD_SN, b"\x00")
-        out["sn"] = s.decode("ascii", "ignore") if s else None
-        m = await self.request(CMD_MODEL, b"\x00")
-        out["model"] = m.decode("ascii", "ignore") if m else None
-        return out
-
-    async def set_density(self, level: int) -> None:
-        """浓度：0~100，官方三档 55/75/95。和 App 一样不等 ACK。"""
+        """浓度 0~100（官方三档 55/75/95）。和 App 一样不等 ACK。"""
         await self._write(build_frame(CMD_DENSITY, self._next_pkg(), bytes([level & 0xFF]), self.key))
         await asyncio.sleep(0.1)
 
@@ -529,9 +419,8 @@ class X1Printer:
             await asyncio.sleep(0.2)
         bits = _pack_bits(prepare(img, mode, sharpen, shift_dots, smooth))
         step = (DOT_WIDTH // 8) * ROWS_PER_PACKET
-        chunks = [bits[i:i + step] for i in range(0, len(bits), step)]
-        for chunk in chunks:
-            await self._write(build_frame(CMD_PRINT, self._next_pkg(), chunk, self.key))
+        for i in range(0, len(bits), step):
+            await self._write(build_frame(CMD_PRINT, self._next_pkg(), bits[i:i + step], self.key))
         if feed_lines:
             await asyncio.sleep(0.15)
             await self.feed(feed_lines)
@@ -540,3 +429,82 @@ class X1Printer:
                          feed_lines: int = DEFAULT_FEED_LINES, lead_lines: int = 0) -> None:
         await self.print_image(render_text(text, font_size), feed_lines=feed_lines,
                                lead_lines=lead_lines)
+
+
+class X1Serial(_ProtocolTransport):
+    """经典蓝牙 SPP（官方 App 走的通道）：Windows 配对后是虚拟串口，整帧灌入、出纸连续。"""
+
+    def __init__(self, port: str, baudrate: int = 115200) -> None:
+        super().__init__()
+        import serial  # pyserial
+
+        self.port = port
+        self.ser = serial.Serial(port, baudrate, timeout=0.2, write_timeout=5)
+
+    @staticmethod
+    def find_port(mac: str | None = None) -> str | None:
+        """按 MAC 找配对后生成的蓝牙串口，避免误抓到别的蓝牙串口。"""
+        from serial.tools import list_ports
+
+        want = mac.replace(":", "").upper() if mac else None
+        for p in list_ports.comports():
+            hwid = (p.hwid or "").upper()
+            if "BTHENUM" not in hwid:
+                continue
+            if want and want in hwid:
+                return p.device
+            if not want:
+                return p.device
+        return None
+
+    async def connect(self) -> None:
+        if not await self.handshake():
+            raise RuntimeError("CRC 密钥握手失败")
+
+    async def close(self) -> None:
+        self.ser.close()
+
+    async def _write(self, data: bytes) -> None:
+        self.ser.write(data)
+
+    def _fill(self) -> None:
+        data = self.ser.read(max(1, self.ser.in_waiting))
+        if data:
+            self.rx.extend(data)
+
+
+class X1Printer(_ProtocolTransport):
+    """BLE 直连（没有配对串口时的兜底）。"""
+
+    def __init__(self, addr: str | None = None) -> None:
+        super().__init__()
+        self.addr = addr or ADDR_DEFAULT
+        self.client: BleakClient | None = None
+
+    async def connect(self) -> None:
+        self.client = BleakClient(self.addr, timeout=25.0)
+        await self.client.connect()
+        await self.client.start_notify(CH_NOTIFY, self._on_notify)
+        await asyncio.sleep(0.3)
+        self.rx.clear()
+        if not await self.handshake():
+            raise RuntimeError("CRC 密钥握手失败")
+
+    async def close(self) -> None:
+        if self.client:
+            await self.client.disconnect()
+            self.client = None
+
+    def _on_notify(self, _sender, data: bytearray) -> None:
+        self.rx.extend(data)
+
+    async def _write(self, data: bytes) -> None:
+        """BLE 上「猛发一小段 + 停一下」：WinRT 逐包等应答只有 ~1KB/s，无应答猛发会丢包。"""
+        assert self.client is not None
+        for i in range(0, len(data), WRITE_BURST):
+            seg = data[i:i + WRITE_BURST]
+            for j in range(0, len(seg), WRITE_CHUNK):
+                await self.client.write_gatt_char(CH_WRITE, seg[j:j + WRITE_CHUNK],
+                                                 response=WRITE_RESPONSE)
+            if WRITE_PAUSE:
+                await asyncio.sleep(WRITE_PAUSE)

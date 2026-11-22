@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "x1print"
+version = "0.1.1"
+description = "相印宝 X1（HPRT 方案）Windows 蓝牙直连打印：文字/图片/PDF/二维码/条码 + YAML 布局 DSL"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["thermal-printer", "bluetooth", "hprt", "receipt", "windows"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Printing",
+]
+dependencies = [
+    "bleak>=0.22",
+    "pyserial>=3.5",
+    "pillow>=10.0",
+    "PyYAML>=6.0",
+    "qrcode>=7.4",
+    "python-barcode>=0.15",
+]
+
+[project.optional-dependencies]
+pdf = ["pymupdf>=1.24"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+x1print = "x1print:main"
+
+[tool.setuptools]
+py-modules = ["x1", "layout", "x1print"]

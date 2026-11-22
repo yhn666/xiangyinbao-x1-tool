@@ -6,6 +6,7 @@
 ![速查卡](docs/img/layout-note.png)
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![CI](https://github.com/yhn666/xiangyinbao-x1-tool/actions/workflows/ci.yml/badge.svg)](https://github.com/yhn666/xiangyinbao-x1-tool/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -24,12 +25,19 @@
 ## 安装
 
 ```powershell
-git clone <this repo>
-cd x1print
+git clone https://github.com/yhn666/xiangyinbao-x1-tool
+cd xiangyinbao-x1-tool
+
+# 方式 A：直接跑
 python -m pip install -r requirements.txt
+python x1print.py --version
+
+# 方式 B：装成命令（推荐）
+python -m pip install -e .
+x1print --version
 ```
 
-需要一台带蓝牙的 Windows 电脑（BLE 4.0 以上）。
+需要一台带蓝牙的 Windows 电脑（BLE 4.0 以上）。Linux/macOS 也能跑 BLE，但字体和蓝牙串口的体验以 Windows 为主。
 
 ## 开始用
 
@@ -134,13 +142,38 @@ blocks:
 ## 目录
 
 ```
-x1.py          # 协议帧 / 两种传输 / 位图打包 / 文字渲染 / 二维码条码
-layout.py      # YAML 布局 DSL（仅 Pillow + PyYAML）
-x1print.py     # 命令行
-examples/      # 布局示例
-tools/         # 标定卡、纸尾标定这类一次性脚本
-docs/          # 协议笔记 + 截图
+x1.py              # 协议帧 / 两种传输（基类共用握手与打印逻辑）/ 位图 / 文字 / 二维码条码
+layout.py          # YAML 布局 DSL（仅 Pillow + PyYAML）
+x1print.py         # 命令行入口（也可 pip install -e . 后直接 x1print）
+pyproject.toml     # 打包与依赖
+examples/          # 布局示例
+tests/             # 不需要打印机的单元测试
+tools/             # 标定卡、纸尾标定这类一次性脚本
+docs/              # 协议笔记 + 截图
+.github/workflows/ # CI：pytest + 布局渲染冒烟
 ```
+
+## 开发与测试
+
+```powershell
+python -m pip install -e ".[dev]"
+python -m pytest -q      # 8 个用例，全部不需要接打印机
+```
+
+CI（GitHub Actions）在 `ubuntu-latest` 上跑同一套用例和一次布局渲染冒烟，不需要真机。
+
+## English
+
+A Windows-friendly Python driver for the Deli **XiangYinBao X1** (HPRT OEM) 58mm thermal printer.
+It speaks the printer's private frame protocol (`0x02 | cmd | pkg | len | payload | crc32 | 0x03`),
+reverse-engineered from the official Android app, prefers classic Bluetooth **SPP** (the same channel
+the app uses) and falls back to paced **BLE** writes on machines without a paired serial port.
+
+Features: text / image / PDF, QR & barcode blocks, a tiny **YAML layout DSL** (`title`, `text`, `divider`,
+`kv`, `qr`, `barcode`, `image`, `space`) with three themes, density presets per paper type, adjustable
+paper feed, and a pixel-exact 1-bit **preview** before every job.
+
+Frame format and command table: [`docs/protocol.md`](docs/protocol.md).
 
 ## 致谢与参考
 

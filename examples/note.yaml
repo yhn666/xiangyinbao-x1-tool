@@ -1,10 +1,10 @@
-theme: minimal
+﻿theme: minimal
 margin: 14
 gap: 10
 blocks:
   - type: title
     text: 今日便签
-    subtitle: 2026-11-22 星期六 · 秦皇岛
+    subtitle: 2026-11-22 星期六
     size: 28
 
   - type: divider
